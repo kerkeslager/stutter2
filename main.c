@@ -121,6 +121,16 @@ struct ParseResult
 };
 /* end types */
 
+/* begin constructors */
+Object* constructObject(Tag tag)
+{
+  Object* result = malloc(sizeof(Object));
+  result->referenceCount = 1;
+  result->tag = tag;
+  return result;
+}
+/* end constructors */
+
 /* begin dereferencers */
 Object* rereferenceObject(Object* self)
 {
@@ -215,9 +225,7 @@ ParseResult integerParser(char* source)
   if(!isDigit(*source)) return result;
 
   result.succeeded = true;
-  result.result = malloc(sizeof(Object));
-  result.result->referenceCount = 1;
-  result.result->tag = INTEGER;
+  result.result = constructObject(INTEGER);
   result.result->instance.integer = 0;
 
   while(isDigit(*(result.remaining)))
@@ -260,9 +268,7 @@ ParseResult sExpressionParserInternal(char* source, bool leadingWhitespaceRequir
   ParseResult remainderParseResult = sExpressionParserInternal(atomParseResult.remaining, true);
 
   result.succeeded = true;
-  result.result = malloc(sizeof(Object));
-  result.result->referenceCount = 1;
-  result.result->tag = S_EXPRESSION;
+  result.result = constructObject(S_EXPRESSION);
   result.result->instance.sExpression.first = atomParseResult.result;
   result.result->instance.sExpression.rest = remainderParseResult.result;
   result.remaining = remainderParseResult.remaining;
@@ -303,9 +309,7 @@ ParseResult stringParser(char* source)
   size_t memoryLength = result.remaining - source;
 
   result.succeeded = true;
-  result.result = malloc(sizeof(Object));
-  result.result->referenceCount = 1;
-  result.result->tag = STRING;
+  result.result = constructObject(STRING);
   result.result->instance.string.characters = memcpy(malloc(memoryLength), source + 1, memoryLength);
   result.result->instance.string.characters[memoryLength] = '\0';
   result.remaining++;
@@ -368,9 +372,7 @@ ParseResult symbolParser(char* source)
   size_t memoryLength = result.remaining - source + 1;
 
   result.succeeded = true;
-  result.result = malloc(sizeof(Object));
-  result.result->referenceCount = 1;
-  result.result->tag = SYMBOL;
+  result.result = constructObject(SYMBOL);
   result.result->instance.symbol.name = memcpy(malloc(memoryLength), source, memoryLength - 1);
   result.result->instance.symbol.name[memoryLength - 1] = '\0';
 
@@ -424,9 +426,7 @@ Object* add2(Environment* environment, Object* a, Object* b)
     exit(EXIT_FAILURE);
   }
 
-  Object* result = malloc(sizeof(Object));
-  result->referenceCount = 1;
-  result->tag = INTEGER;
+  Object* result = constructObject(INTEGER);
   result->instance.integer = a->instance.integer + b->instance.integer;
   return result;
 }
@@ -472,8 +472,7 @@ Object* evaluate1(Environment* environment, Object* object)
 
 Object* show1(Object* object)
 {
-  Object* result = malloc(sizeof(Object));
-  result->tag = STRING;
+  Object* result = constructObject(STRING);
 
   String string;
 
@@ -565,9 +564,8 @@ Object* evaluateArguments(Environment* environment, Object* arguments)
 {
   if(arguments == NULL) return NULL;
 
-  Object* sExpression = malloc(sizeof(Object));
-  sExpression->referenceCount = 1;
-  sExpression->tag = S_EXPRESSION;
+  Object* sExpression = constructObject(S_EXPRESSION);
+
   sExpression->instance.sExpression.first = evaluate1(
       environment,
       arguments->instance.sExpression.first);
@@ -604,14 +602,11 @@ void repl()
   Environment* environment = malloc(sizeof(Environment));
   environment->referenceCount = 1;
 
-  environment->key = malloc(sizeof(Object));
-  environment->key->referenceCount = 1;
-  environment->key->tag = SYMBOL;
+  environment->key = constructObject(SYMBOL);
   environment->key->instance.symbol.name = malloc(2);
   snprintf(environment->key->instance.symbol.name, 2, "+");
 
-  environment->value = malloc(sizeof(Object));
-  environment->value->tag = CLOSURE;
+  environment->value = constructObject(CLOSURE);
   environment->value->instance.closure = add;
 
   environment->next = NULL;
