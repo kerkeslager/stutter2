@@ -73,6 +73,7 @@ union Instance
 
 struct Object
 {
+  size_t referenceCount;
   Tag tag;
   Instance instance;
 };
@@ -86,6 +87,35 @@ struct ParseResult
   char* remaining;
 };
 /* end types */
+
+/* begin dereferencers */
+Object* rereferenceObject(Object* self)
+{
+  self->referenceCount++;
+  return self;
+}
+
+void dereferenceObject(Object* self)
+{
+  if(self == NULL) return;
+
+  self->referenceCount--;
+
+  if(self->referenceCount > 0) return;
+
+  switch(self->tag)
+  {
+    case INTEGER:
+      free(self);
+      break;
+
+    case STRING:
+      free(self->instance.string.characters);
+      free(self);
+      break;
+  }
+}
+/* end dereferencers */
 
 /* begin parser */
 ParseResult integerParser(char* source);
@@ -105,6 +135,7 @@ ParseResult integerParser(char* source)
 
   result.succeeded = true;
   result.result = malloc(sizeof(Object));
+  result.result->referenceCount = 1;
   result.result->tag = INTEGER;
   result.result->instance.integer = 0;
 
@@ -145,6 +176,7 @@ ParseResult stringParser(char* source)
 
   result.succeeded = true;
   result.result = malloc(sizeof(Object));
+  result.result->referenceCount = 1;
   result.result->tag = STRING;
   result.result->instance.string.characters = memcpy(malloc(memoryLength), source + 1, memoryLength);
   result.result->instance.string.characters[memoryLength - 1] = '\0';
@@ -185,6 +217,13 @@ Object* parse(ParseResult (*parser)(char*), char* source)
 /* end parser */
 
 /* begin builtins */
+Object* evaluate1(Object* object)
+{
+  if(object == NULL) return NULL;
+
+  return rereferenceObject(object);
+}
+
 Object* show1(Object* object)
 {
   Object* result = malloc(sizeof(Object));
@@ -247,13 +286,15 @@ void repl()
     add_history(input);
 
     /* begin handling input */
-    Object* result = parse(objectParser, input);
+    Object* expression = parse(objectParser, input);
+    Object* result = evaluate1(expression);
     Object* display = show1(result);
 
     printf("%s\n", display->instance.string.characters);
 
-    free(result);
-    free(display);
+    dereferenceObject(result);
+    dereferenceObject(expression);
+    dereferenceObject(display);
     /* end handling input */
 
     free(input);
