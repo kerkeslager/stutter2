@@ -1,1 +1,1 @@
-gcc -lreadline -Wall -Wextra -Wformat -Wpedantic main.c
+gcc -lreadline -Wall -Wextra -Wformat main.c
