@@ -42,6 +42,7 @@ char* itoa(int n, char s[])
 /* end utilities */
 
 /* begin types */
+struct SExpression;
 struct String;
 struct Symbol;
 
@@ -51,6 +52,7 @@ struct Object;
 
 struct Environment;
 
+typedef struct SExpression SExpression;
 typedef struct String String;
 typedef struct Symbol Symbol;
 
@@ -59,6 +61,12 @@ typedef union Instance Instance;
 typedef struct Object Object;
 
 typedef struct Environment Environment;
+
+struct SExpression
+{
+  Object* first;
+  Object* rest; // must be an s-expression
+};
 
 struct String
 {
@@ -72,14 +80,18 @@ struct Symbol
 
 enum Tag
 {
+  CLOSURE,
   INTEGER,
+  S_EXPRESSION,
   STRING,
   SYMBOL
 };
 
 union Instance
 {
+  Object* (*closure)(Environment* environment, Object* arguments);
   int32_t integer;
+  SExpression sExpression;
   String string;
   Symbol symbol;
 };
@@ -126,7 +138,14 @@ void dereferenceObject(Object* self)
 
   switch(self->tag)
   {
+    case CLOSURE:
     case INTEGER:
+      free(self);
+      break;
+
+    case S_EXPRESSION:
+      dereferenceObject(self->instance.sExpression.first);
+      dereferenceObject(self->instance.sExpression.rest);
       free(self);
       break;
 
@@ -136,6 +155,8 @@ void dereferenceObject(Object* self)
       break;
 
     case SYMBOL:
+      free(self->instance.symbol.name);
+      free(self);
       break;
 
     default:
@@ -147,17 +168,49 @@ void dereferenceObject(Object* self)
 
 /* begin parser */
 ParseResult integerParser(char* source);
+ParseResult sExpressionParser(char* source);
+ParseResult stringParser(char* source);
+ParseResult symbolParser(char* source);
+ParseResult objectParser(char* source);
 Object* parse(ParseResult (*parser)(char*), char* source);
+
+bool isWhitespaceCharacter(char character)
+{
+  switch(character)
+  {
+    case ' ':
+    case '\t':
+    case '\n':
+      return true;
+
+    default:
+      return false;
+  }
+}
+
+char* consumeWhitespace(char* source)
+{
+  while(isWhitespaceCharacter(*source)) source++;
+  return source;
+}
+
+ParseResult initializedParseResult(char* source)
+{
+  ParseResult result;
+  result.succeeded = false;
+  result.result = NULL;
+  result.remaining = source;
+  return result;
+}
 
 bool isDigit(char character) { return '0' <= character && character <= '9'; }
 int32_t toDigit(char character) { return character - '0'; }
 
 ParseResult integerParser(char* source)
 {
-  ParseResult result;
-  result.succeeded = false;
-  result.result = NULL;
-  result.remaining = source;
+  source = consumeWhitespace(source);
+
+  ParseResult result = initializedParseResult(source);
 
   if(!isDigit(*source)) return result;
 
@@ -178,12 +231,59 @@ ParseResult integerParser(char* source)
   return result;
 }
 
+ParseResult sExpressionParserInternal(char* source, bool leadingWhitespaceRequired)
+{
+  ParseResult result = initializedParseResult(consumeWhitespace(source));
+
+  if(*(result.remaining) == ')')
+  {
+    result.succeeded = true;
+    result.result = NULL;
+    result.remaining++;
+    return result;
+  }
+
+  if(leadingWhitespaceRequired && source == result.remaining)
+  {
+    printf("Did not consume whitespace where required");
+    exit(EXIT_FAILURE);
+  }
+
+  ParseResult atomParseResult = objectParser(result.remaining);
+
+  if(!atomParseResult.succeeded)
+  {
+    printf("Parenthese opened but not closed");
+    exit(EXIT_FAILURE);
+  }
+
+  ParseResult remainderParseResult = sExpressionParserInternal(atomParseResult.remaining, true);
+
+  result.succeeded = true;
+  result.result = malloc(sizeof(Object));
+  result.result->referenceCount = 1;
+  result.result->tag = S_EXPRESSION;
+  result.result->instance.sExpression.first = atomParseResult.result;
+  result.result->instance.sExpression.rest = remainderParseResult.result;
+  result.remaining = remainderParseResult.remaining;
+
+  return result;
+}
+
+ParseResult sExpressionParser(char* source)
+{
+  ParseResult result = initializedParseResult(consumeWhitespace(source));
+
+  if(*(result.remaining) != '(') return result;
+
+  result.remaining++;
+
+  return sExpressionParserInternal(result.remaining, false);
+}
+
 ParseResult stringParser(char* source)
 {
-  ParseResult result;
-  result.succeeded = false;
-  result.result = NULL;
-  result.remaining = source;
+  ParseResult result = initializedParseResult(consumeWhitespace(source));
 
   if(*(result.remaining) != '"') return result;
 
@@ -215,15 +315,45 @@ ParseResult stringParser(char* source)
 
 bool isSymbolCharacter(char character)
 {
-  return 'a' <= character && character <= 'z';
+  switch(character)
+  {
+    case 'a':
+    case 'b':
+    case 'c':
+    case 'd':
+    case 'e':
+    case 'f':
+    case 'g':
+    case 'h':
+    case 'i':
+    case 'j':
+    case 'k':
+    case 'l':
+    case 'm':
+    case 'n':
+    case 'o':
+    case 'p':
+    case 'q':
+    case 'r':
+    case 's':
+    case 't':
+    case 'u':
+    case 'v':
+    case 'w':
+    case 'x':
+    case 'y':
+    case 'z':
+    case '+':
+      return true;
+
+    default:
+      return false;
+  }
 }
 
 ParseResult symbolParser(char* source)
 {
-  ParseResult result;
-  result.succeeded = false;
-  result.result = NULL;
-  result.remaining = source;
+  ParseResult result = initializedParseResult(consumeWhitespace(source));
 
   if(!isSymbolCharacter(*(result.remaining)))
   {
@@ -249,11 +379,12 @@ ParseResult symbolParser(char* source)
 
 ParseResult objectParser(char* source)
 {
-#define PARSER_COUNT 3
+#define PARSER_COUNT 4
 
   ParseResult (*parsers[PARSER_COUNT])(char*) =
   {
     integerParser,
+    sExpressionParser,
     stringParser,
     symbolParser
   };
@@ -281,7 +412,31 @@ Object* parse(ParseResult (*parser)(char*), char* source)
 }
 /* end parser */
 
-/* begin builtins */
+/* begin c builtins */
+Object* add2(Environment* environment, Object* a, Object* b);
+Object* evaluate1(Environment* environment, Object* object);
+
+Object* add2(Environment* environment, Object* a, Object* b)
+{
+  if(!(a->tag == INTEGER) || !(b->tag == INTEGER))
+  {
+    printf("Can only add integers");
+    exit(EXIT_FAILURE);
+  }
+
+  Object* result = malloc(sizeof(Object));
+  result->referenceCount = 1;
+  result->tag = INTEGER;
+  result->instance.integer = a->instance.integer + b->instance.integer;
+  return result;
+}
+
+Object* evaluateSExpression(Environment* environment, Object* sExpression)
+{
+  Object* applicative = evaluate1(environment, sExpression->instance.sExpression.first);
+  return applicative->instance.closure(environment, sExpression->instance.sExpression.rest);
+}
+
 Object* evaluate1(Environment* environment, Object* object)
 {
   if(object == NULL) return NULL;
@@ -291,6 +446,9 @@ Object* evaluate1(Environment* environment, Object* object)
     case INTEGER:
     case STRING:
       return rereferenceObject(object);
+
+    case S_EXPRESSION:
+      return evaluateSExpression(environment, object);
 
     case SYMBOL:
       while(environment != NULL)
@@ -329,8 +487,18 @@ Object* show1(Object* object)
 
   else switch(object->tag)
   {
+    case CLOSURE:
+      string.characters = malloc(10);
+      snprintf(string.characters, 10, "(Closure)");
+      break;
+
     case INTEGER:
       string.characters = itoa(object->instance.integer, malloc(11));
+      break;
+
+    case S_EXPRESSION:
+      string.characters = malloc(14);
+      snprintf(string.characters, 14, "(SExpression)");
       break;
 
     case STRING:
@@ -352,7 +520,83 @@ Object* show1(Object* object)
 
   return result;
 }
-/* end builtins */
+/* end c builtins */
+
+/* begin c appliers */
+size_t sExpressionLength(Object* sExpression)
+{
+  if(sExpression == NULL) return 0;
+
+  if(sExpression->tag != S_EXPRESSION)
+  {
+    printf("argument must be an s expression");
+    exit(EXIT_FAILURE);
+  }
+
+  return sExpressionLength(sExpression->instance.sExpression.rest) + 1;
+}
+
+Object* cApply2(
+    Object* (*call)(Environment*,Object*,Object*),
+    Environment* environment,
+    Object* arguments)
+{
+  size_t argumentCount = sExpressionLength(arguments);
+
+  if(argumentCount < 2)
+  {
+    printf("Not enough arguments");
+    exit(EXIT_FAILURE);
+  }
+
+  if(argumentCount > 2)
+  {
+    printf("Too many arguments");
+    exit(EXIT_FAILURE);
+  }
+
+  return call(
+      environment,
+      arguments->instance.sExpression.first,
+      arguments->instance.sExpression.rest->instance.sExpression.first);
+}
+
+Object* evaluateArguments(Environment* environment, Object* arguments)
+{
+  if(arguments == NULL) return NULL;
+
+  Object* sExpression = malloc(sizeof(Object));
+  sExpression->referenceCount = 1;
+  sExpression->tag = S_EXPRESSION;
+  sExpression->instance.sExpression.first = evaluate1(
+      environment,
+      arguments->instance.sExpression.first);
+
+  sExpression->instance.sExpression.rest = evaluateArguments(
+      environment,
+      arguments->instance.sExpression.rest);
+
+  return sExpression;
+}
+
+Object* cApplyFunction2(
+    Object* (*call)(Environment*,Object*,Object*),
+    Environment* environment,
+    Object* arguments)
+{
+  return cApply2(
+      call,
+      environment,
+      evaluateArguments(environment, arguments));
+}
+/* end c appliers */
+
+/* begin lisp builtins */
+Object* add(Environment* environment, Object* arguments)
+{
+  return cApplyFunction2(add2, environment, arguments);
+}
+/* end lisp builtins */
 
 /* begin runner */
 void repl()
@@ -363,13 +607,12 @@ void repl()
   environment->key = malloc(sizeof(Object));
   environment->key->referenceCount = 1;
   environment->key->tag = SYMBOL;
-  environment->key->instance.symbol.name = malloc(5);
-  snprintf(environment->key->instance.symbol.name, 5, "test");
-  environment->key->instance.symbol.name[4] = '\0';
+  environment->key->instance.symbol.name = malloc(2);
+  snprintf(environment->key->instance.symbol.name, 2, "+");
 
   environment->value = malloc(sizeof(Object));
-  environment->value->tag = INTEGER;
-  environment->value->instance.integer = 42;
+  environment->value->tag = CLOSURE;
+  environment->value->instance.closure = add;
 
   environment->next = NULL;
 
