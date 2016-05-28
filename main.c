@@ -49,12 +49,16 @@ enum Tag;
 union Instance;
 struct Object;
 
+struct Environment;
+
 typedef struct String String;
 typedef struct Symbol Symbol;
 
 typedef enum Tag Tag;
 typedef union Instance Instance;
 typedef struct Object Object;
+
+typedef struct Environment Environment;
 
 struct String
 {
@@ -85,6 +89,14 @@ struct Object
   size_t referenceCount;
   Tag tag;
   Instance instance;
+};
+
+struct Environment
+{
+  size_t referenceCount;
+  Object* key; // Must be a symbol
+  Object* value;
+  Environment* next;
 };
 
 struct ParseResult;
@@ -195,7 +207,7 @@ ParseResult stringParser(char* source)
   result.result->referenceCount = 1;
   result.result->tag = STRING;
   result.result->instance.string.characters = memcpy(malloc(memoryLength), source + 1, memoryLength);
-  result.result->instance.string.characters[memoryLength - 1] = '\0';
+  result.result->instance.string.characters[memoryLength] = '\0';
   result.remaining++;
 
   return result;
@@ -270,7 +282,7 @@ Object* parse(ParseResult (*parser)(char*), char* source)
 /* end parser */
 
 /* begin builtins */
-Object* evaluate1(Object* object)
+Object* evaluate1(Environment* environment, Object* object)
 {
   if(object == NULL) return NULL;
 
@@ -281,7 +293,18 @@ Object* evaluate1(Object* object)
       return rereferenceObject(object);
 
     case SYMBOL:
-      return NULL;
+      while(environment != NULL)
+      {
+        if(strcmp(object->instance.symbol.name, environment->key->instance.symbol.name) == 0)
+        {
+          return rereferenceObject(environment->value);
+        }
+
+        environment = environment->next;
+      }
+
+      printf("Symbol \"%s\" not defined", object->instance.symbol.name);
+      exit(EXIT_FAILURE);
 
     default:
       printf("Unexpected object type passed to evaluate1");
@@ -334,6 +357,22 @@ Object* show1(Object* object)
 /* begin runner */
 void repl()
 {
+  Environment* environment = malloc(sizeof(Environment));
+  environment->referenceCount = 1;
+
+  environment->key = malloc(sizeof(Object));
+  environment->key->referenceCount = 1;
+  environment->key->tag = SYMBOL;
+  environment->key->instance.symbol.name = malloc(5);
+  snprintf(environment->key->instance.symbol.name, 5, "test");
+  environment->key->instance.symbol.name[4] = '\0';
+
+  environment->value = malloc(sizeof(Object));
+  environment->value->tag = INTEGER;
+  environment->value->instance.integer = 42;
+
+  environment->next = NULL;
+
   char* input, shell_prompt[100];
 
   // Configure readline to auto-complete paths when the tab key is hit.
@@ -359,7 +398,7 @@ void repl()
 
     /* begin handling input */
     Object* expression = parse(objectParser, input);
-    Object* result = evaluate1(expression);
+    Object* result = evaluate1(environment, expression);
     Object* display = show1(result);
 
     printf("%s\n", display->instance.string.characters);
