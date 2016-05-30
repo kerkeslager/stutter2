@@ -129,6 +129,16 @@ Object* constructObject(Tag tag)
   result->tag = tag;
   return result;
 }
+
+Environment* constructEnvironment(Object* key, Object* value, Environment* next)
+{
+  Environment* result = malloc(sizeof(Environment));
+  result->referenceCount = 1;
+  result->key = key;
+  result->value = value;
+  result->next = next;
+  return result;
+}
 /* end constructors */
 
 /* begin dereferencers */
@@ -232,6 +242,9 @@ bool isSymbolCharacter(char character)
     case 'y':
     case 'z':
     case '+':
+    case '-':
+    case '*':
+    case '/':
       return true;
 
     default:
@@ -474,18 +487,33 @@ Object* prepend2(Object* item, Object* sExpression)
   return result;
 }
 
-Object* add2(Object* a, Object* b)
+Object* mathOperation(Object* a, Object* b, int32_t (*operation)(int32_t,int32_t))
 {
   if(!(a->tag == INTEGER) || !(b->tag == INTEGER))
   {
-    printf("Can only add integers");
+    printf("Can only operate on integers");
     exit(EXIT_FAILURE);
   }
 
   Object* result = constructObject(INTEGER);
-  result->instance.integer = a->instance.integer + b->instance.integer;
+  result->instance.integer = operation(a->instance.integer, b->instance.integer);
   return result;
 }
+
+int32_t addOperation(int32_t a, int32_t b) { return a + b; }
+Object* add2(Object* a, Object* b) { return mathOperation(a,b,addOperation); }
+
+int32_t divideOperation(int32_t a, int32_t b) { return a / b; }
+Object* divideInteger2(Object* a, Object* b) { return mathOperation(a,b,divideOperation); }
+
+int32_t modulusOperation(int32_t a, int32_t b) { return a % b; }
+Object* modulus2(Object* a, Object* b) { return mathOperation(a,b,modulusOperation); }
+
+int32_t multiplyOperation(int32_t a, int32_t b) { return a * b; }
+Object* multiply2(Object* a, Object* b) { return mathOperation(a,b,multiplyOperation); }
+
+int32_t subtractOperation(int32_t a, int32_t b) { return a - b; }
+Object* subtract2(Object* a, Object* b) { return mathOperation(a,b,subtractOperation); }
 
 Object* show1(Object* object)
 {
@@ -648,22 +676,54 @@ Object* add(Environment* environment, Object* arguments)
 {
   return cApplyFunction2(add2, environment, arguments);
 }
+
+Object* divideInteger(Environment* environment, Object* arguments)
+{
+  return cApplyFunction2(divideInteger2, environment, arguments);
+}
+
+Object* modulus(Environment* environment, Object* arguments)
+{
+  return cApplyFunction2(modulus2, environment, arguments);
+}
+
+Object* multiply(Environment* environment, Object* arguments)
+{
+  return cApplyFunction2(multiply2, environment, arguments);
+}
+
+Object* subtract(Environment* environment, Object* arguments)
+{
+  return cApplyFunction2(subtract2, environment, arguments);
+}
 /* end lisp builtins */
 
 /* begin runner */
+Environment* prependBuiltinClosure(
+    char* name,
+    Object* (*call)(Environment*,Object*),
+    Environment* next)
+{
+  size_t nameLength = strlen(name);
+
+  Object* key = constructObject(SYMBOL);
+  key->instance.symbol.name = malloc(nameLength + 1);
+  snprintf(key->instance.symbol.name, nameLength + 1, name);
+
+  Object* value = constructObject(CLOSURE);
+  value->instance.closure = call;
+
+  return constructEnvironment(key, value, next);
+}
+
 void repl()
 {
-  Environment* environment = malloc(sizeof(Environment));
-  environment->referenceCount = 1;
-
-  environment->key = constructObject(SYMBOL);
-  environment->key->instance.symbol.name = malloc(2);
-  snprintf(environment->key->instance.symbol.name, 2, "+");
-
-  environment->value = constructObject(CLOSURE);
-  environment->value->instance.closure = add;
-
-  environment->next = NULL;
+  Environment* environment = NULL;
+  environment = prependBuiltinClosure("+", add, environment);
+  environment = prependBuiltinClosure("//", divideInteger, environment);
+  environment = prependBuiltinClosure("mod", modulus, environment);
+  environment = prependBuiltinClosure("*", multiply, environment);
+  environment = prependBuiltinClosure("-", subtract, environment);
 
   char* input, shell_prompt[100];
 
