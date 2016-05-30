@@ -134,6 +134,7 @@ Object* constructObject(Tag tag)
 /* begin dereferencers */
 Object* rereferenceObject(Object* self)
 {
+  if(self == NULL) return self;
   self->referenceCount++;
   return self;
 }
@@ -414,11 +415,53 @@ Object* parse(ParseResult (*parser)(char*), char* source)
 }
 /* end parser */
 
-/* begin c builtins */
-Object* add2(Environment* environment, Object* a, Object* b);
-Object* evaluate1(Environment* environment, Object* object);
+/* begin c builtin declarations */
+Object* first1(Object* sExpression);
+Object* rest1(Object* sExpression);
+Object* add2(Object* a, Object* b);
+Object* show1(Object* object);
 
-Object* add2(Environment* environment, Object* a, Object* b)
+Object* evaluate1(Environment* environment, Object* object);
+/* end c builtin declarations */
+
+/* begin c builtin functions */
+Object* first1(Object* sExpression)
+{
+  if(!(sExpression->tag == S_EXPRESSION))
+  {
+    printf("first1 only takes s-expressions");
+    exit(EXIT_FAILURE);
+  }
+
+  return sExpression->instance.sExpression.first;
+}
+
+Object* rest1(Object* sExpression)
+{
+  if(!(sExpression->tag == S_EXPRESSION))
+  {
+    printf("rest1 only takes s-expressions");
+    exit(EXIT_FAILURE);
+  }
+
+  return sExpression->instance.sExpression.rest;
+}
+
+Object* prepend2(Object* item, Object* sExpression)
+{
+  if(!(sExpression == NULL || sExpression->tag == S_EXPRESSION))
+  {
+    printf("prepend2 argument 2 only takes s-expressions");
+    exit(EXIT_FAILURE);
+  }
+
+  Object* result = constructObject(S_EXPRESSION);
+  result->instance.sExpression.first = item;
+  result->instance.sExpression.rest = rereferenceObject(sExpression);
+  return result;
+}
+
+Object* add2(Object* a, Object* b)
 {
   if(!(a->tag == INTEGER) || !(b->tag == INTEGER))
   {
@@ -429,45 +472,6 @@ Object* add2(Environment* environment, Object* a, Object* b)
   Object* result = constructObject(INTEGER);
   result->instance.integer = a->instance.integer + b->instance.integer;
   return result;
-}
-
-Object* evaluateSExpression(Environment* environment, Object* sExpression)
-{
-  Object* applicative = evaluate1(environment, sExpression->instance.sExpression.first);
-  return applicative->instance.closure(environment, sExpression->instance.sExpression.rest);
-}
-
-Object* evaluate1(Environment* environment, Object* object)
-{
-  if(object == NULL) return NULL;
-
-  switch(object->tag)
-  {
-    case INTEGER:
-    case STRING:
-      return rereferenceObject(object);
-
-    case S_EXPRESSION:
-      return evaluateSExpression(environment, object);
-
-    case SYMBOL:
-      while(environment != NULL)
-      {
-        if(strcmp(object->instance.symbol.name, environment->key->instance.symbol.name) == 0)
-        {
-          return rereferenceObject(environment->value);
-        }
-
-        environment = environment->next;
-      }
-
-      printf("Symbol \"%s\" not defined", object->instance.symbol.name);
-      exit(EXIT_FAILURE);
-
-    default:
-      printf("Unexpected object type passed to evaluate1");
-      exit(EXIT_FAILURE);
-  }
 }
 
 Object* show1(Object* object)
@@ -519,7 +523,48 @@ Object* show1(Object* object)
 
   return result;
 }
-/* end c builtins */
+/* end c builtin functions */
+
+/* begin c builtin applicatives */
+Object* evaluateSExpression(Environment* environment, Object* sExpression)
+{
+  Object* applicative = evaluate1(environment, sExpression->instance.sExpression.first);
+  return applicative->instance.closure(environment, sExpression->instance.sExpression.rest);
+}
+
+Object* evaluate1(Environment* environment, Object* object)
+{
+  if(object == NULL) return NULL;
+
+  switch(object->tag)
+  {
+    case INTEGER:
+    case STRING:
+      return rereferenceObject(object);
+
+    case S_EXPRESSION:
+      return evaluateSExpression(environment, object);
+
+    case SYMBOL:
+      while(environment != NULL)
+      {
+        if(strcmp(object->instance.symbol.name, environment->key->instance.symbol.name) == 0)
+        {
+          return rereferenceObject(environment->value);
+        }
+
+        environment = environment->next;
+      }
+
+      printf("Symbol \"%s\" not defined", object->instance.symbol.name);
+      exit(EXIT_FAILURE);
+
+    default:
+      printf("Unexpected object type passed to evaluate1");
+      exit(EXIT_FAILURE);
+  }
+}
+/* end c builtin applicatives */
 
 /* begin c appliers */
 size_t sExpressionLength(Object* sExpression)
@@ -533,6 +578,12 @@ size_t sExpressionLength(Object* sExpression)
   }
 
   return sExpressionLength(sExpression->instance.sExpression.rest) + 1;
+}
+
+Object* sExpressionGet(Object* sExpression, size_t index)
+{
+  if(index == 0) return first1(sExpression);
+  return sExpressionGet(rest1(sExpression), index - 1);
 }
 
 Object* cApply2(
@@ -554,38 +605,28 @@ Object* cApply2(
     exit(EXIT_FAILURE);
   }
 
-  return call(
-      environment,
-      arguments->instance.sExpression.first,
-      arguments->instance.sExpression.rest->instance.sExpression.first);
+  return call(environment, sExpressionGet(arguments, 0), sExpressionGet(arguments, 1));
 }
 
 Object* evaluateArguments(Environment* environment, Object* arguments)
 {
   if(arguments == NULL) return NULL;
 
-  Object* sExpression = constructObject(S_EXPRESSION);
-
-  sExpression->instance.sExpression.first = evaluate1(
-      environment,
-      arguments->instance.sExpression.first);
-
-  sExpression->instance.sExpression.rest = evaluateArguments(
-      environment,
-      arguments->instance.sExpression.rest);
-
-  return sExpression;
+  return prepend2(
+      evaluate1(environment, first1(arguments)),
+      evaluateArguments(environment, rest1(arguments)));
 }
 
 Object* cApplyFunction2(
-    Object* (*call)(Environment*,Object*,Object*),
+    Object* (*call)(Object*,Object*),
     Environment* environment,
     Object* arguments)
 {
-  return cApply2(
-      call,
-      environment,
-      evaluateArguments(environment, arguments));
+  Object* evaluatedArguments = evaluateArguments(environment, arguments);
+
+  return call(
+      sExpressionGet(evaluatedArguments, 0),
+      sExpressionGet(evaluatedArguments, 1));
 }
 /* end c appliers */
 
