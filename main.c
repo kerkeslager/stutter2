@@ -177,14 +177,7 @@ void dereferenceObject(Object* self)
 }
 /* end dereferencers */
 
-/* begin parser */
-ParseResult integerParser(char* source);
-ParseResult sExpressionParser(char* source);
-ParseResult stringParser(char* source);
-ParseResult symbolParser(char* source);
-ParseResult objectParser(char* source);
-Object* parse(ParseResult (*parser)(char*), char* source);
-
+/* begin parser helpers */
 bool isWhitespaceCharacter(char character)
 {
   switch(character)
@@ -205,6 +198,56 @@ char* consumeWhitespace(char* source)
   return source;
 }
 
+bool isDigit(char character) { return '0' <= character && character <= '9'; }
+int32_t toDigit(char character) { return character - '0'; }
+
+bool isSymbolCharacter(char character)
+{
+  switch(character)
+  {
+    case 'a':
+    case 'b':
+    case 'c':
+    case 'd':
+    case 'e':
+    case 'f':
+    case 'g':
+    case 'h':
+    case 'i':
+    case 'j':
+    case 'k':
+    case 'l':
+    case 'm':
+    case 'n':
+    case 'o':
+    case 'p':
+    case 'q':
+    case 'r':
+    case 's':
+    case 't':
+    case 'u':
+    case 'v':
+    case 'w':
+    case 'x':
+    case 'y':
+    case 'z':
+    case '+':
+      return true;
+
+    default:
+      return false;
+  }
+}
+/* end parser helpers */
+
+/* begin parser */
+ParseResult integerParser(char* source);
+ParseResult sExpressionParser(char* source);
+ParseResult stringParser(char* source);
+ParseResult symbolParser(char* source);
+ParseResult objectParser(char* source);
+Object* parse(ParseResult (*parser)(char*), char* source);
+
 ParseResult initializedParseResult(char* source)
 {
   ParseResult result;
@@ -214,19 +257,25 @@ ParseResult initializedParseResult(char* source)
   return result;
 }
 
-bool isDigit(char character) { return '0' <= character && character <= '9'; }
-int32_t toDigit(char character) { return character - '0'; }
-
 ParseResult integerParser(char* source)
 {
   source = consumeWhitespace(source);
 
   ParseResult result = initializedParseResult(source);
 
+  int32_t sign = 1;
+
+  if(*source == '-')
+  {
+    sign = -1;
+    source++;
+  }
+
   if(!isDigit(*source)) return result;
 
   result.succeeded = true;
   result.result = constructObject(INTEGER);
+  result.remaining = source; // This is necessary because we added to source to consume the -
   result.result->instance.integer = 0;
 
   while(isDigit(*(result.remaining)))
@@ -236,6 +285,8 @@ ParseResult integerParser(char* source)
     result.result->instance.integer += toDigit(*(result.remaining));
     result.remaining++;
   }
+
+  result.result->instance.integer *= sign;
 
   return result;
 }
@@ -316,44 +367,6 @@ ParseResult stringParser(char* source)
   result.remaining++;
 
   return result;
-}
-
-bool isSymbolCharacter(char character)
-{
-  switch(character)
-  {
-    case 'a':
-    case 'b':
-    case 'c':
-    case 'd':
-    case 'e':
-    case 'f':
-    case 'g':
-    case 'h':
-    case 'i':
-    case 'j':
-    case 'k':
-    case 'l':
-    case 'm':
-    case 'n':
-    case 'o':
-    case 'p':
-    case 'q':
-    case 'r':
-    case 's':
-    case 't':
-    case 'u':
-    case 'v':
-    case 'w':
-    case 'x':
-    case 'y':
-    case 'z':
-    case '+':
-      return true;
-
-    default:
-      return false;
-  }
 }
 
 ParseResult symbolParser(char* source)
