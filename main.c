@@ -80,6 +80,7 @@ struct Symbol
 
 enum Tag
 {
+  BOOLEAN,
   CLOSURE,
   INTEGER,
   S_EXPRESSION,
@@ -89,6 +90,7 @@ enum Tag
 
 union Instance
 {
+  bool boolean;
   Object* (*closure)(Environment* environment, Object* arguments);
   int32_t integer;
   SExpression sExpression;
@@ -159,6 +161,7 @@ void dereferenceObject(Object* self)
 
   switch(self->tag)
   {
+    case BOOLEAN:
     case CLOSURE:
     case INTEGER:
       free(self);
@@ -531,6 +534,19 @@ Object* show1(Object* object)
 
   else switch(object->tag)
   {
+    case BOOLEAN:
+      if(object->instance.boolean)
+      {
+        string.characters = malloc(5);
+        snprintf(string.characters, 5, "true");
+      }
+      else
+      {
+        string.characters = malloc(6);
+        snprintf(string.characters, 6, "false");
+      }
+      break;
+
     case CLOSURE:
       string.characters = malloc(10);
       snprintf(string.characters, 10, "(Closure)");
@@ -579,6 +595,7 @@ Object* evaluate1(Environment* environment, Object* object)
 
   switch(object->tag)
   {
+    case BOOLEAN:
     case INTEGER:
     case STRING:
       return rereferenceObject(object);
@@ -699,6 +716,23 @@ Object* subtract(Environment* environment, Object* arguments)
 /* end lisp builtins */
 
 /* begin runner */
+Environment* prependBuiltinBoolean(
+    char* name,
+    bool boolean,
+    Environment* next)
+{
+  size_t nameLength = strlen(name);
+
+  Object* key = constructObject(SYMBOL);
+  key->instance.symbol.name = malloc(nameLength + 1);
+  snprintf(key->instance.symbol.name, nameLength + 1, name);
+
+  Object* value = constructObject(BOOLEAN);
+  value->instance.boolean = boolean;
+
+  return constructEnvironment(key, value, next);
+}
+
 Environment* prependBuiltinClosure(
     char* name,
     Object* (*call)(Environment*,Object*),
@@ -719,6 +753,8 @@ Environment* prependBuiltinClosure(
 void repl()
 {
   Environment* environment = NULL;
+  environment = prependBuiltinBoolean("true", true, environment);
+  environment = prependBuiltinBoolean("false", false, environment);
   environment = prependBuiltinClosure("+", add, environment);
   environment = prependBuiltinClosure("//", divideInteger, environment);
   environment = prependBuiltinClosure("mod", modulus, environment);
